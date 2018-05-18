@@ -20,38 +20,41 @@
 
 #define NUM_PLAYERS 2
 
-struct Pins {
-  // Map from player ID -> left/right button pin
-  FlatLongMap left_button;
-  FlatLongMap right_button;
+void resetBallTimer();
+void resetPaddleTimer(int player);
+
+class Paddle {
+ public:
+  int x, y;
+  int leftButtonPin = -1;
+  int rightButtonPin = -1;
+
+  void Init(int startX, int startY) {
+    x = startX;
+    y = startY;
+  }
   
-  Pins(int num_players) : left_button(num_players), right_button(num_players) {
-    int pin = FIRST_BUTTON_PIN;
-    for (int player = 0; player < num_players; ++player) {
-      pinMode(pin, INPUT_PULLUP);
-      left_button.Insert(player, pin++);
-      pinMode(pin, INPUT_PULLUP);
-      right_button.Insert(player, pin++);
-    }
+  // Paddle(int startX_, int startY_) : x(startX), y(startY), oldX(startX), oldY(startY), id(id_) {}
+
+  int SetupPins(int nextAvailablePin) {
+    leftButtonPin = nextAvailablePin;
+    pinMode(leftButtonPin, INPUT_PULLUP);
+    rightButtonPin = leftButtonPin + 1;
+    pinMode(rightButtonPin, INPUT_PULLUP);
+    return rightButtonPin + 1;
   }
 };
 
-Pins PINS(NUM_PLAYERS);
-
+Paddle paddles[NUM_PLAYERS];
 
 
 MCUFRIEND_kbv tft;
 
-int paddleX = 130;
-int paddleY = 130;
-int oldPaddleX = paddleX;
-int oldPaddleY = paddleY;
-
 int ballDirectionX = 1;
 int ballDirectionY = 1;
 
-int ballSpeed = 50; // Pixels per second
-int paddleSpeed = 30; // Pixels per second
+int ballSpeed = 150; // Pixels per second
+int paddleSpeed = 100; // Pixels per second
 int paddleHeight = 5;
 int paddleWidth = 20;
 int ballSize = 5;
@@ -61,13 +64,12 @@ int ballX, ballY, oldBallX, oldBallY;
 int SCREEN_WIDTH = 0;
 int SCREEN_HEIGHT = 0;
 
+int ballMillisPerPixel = 1000 / ballSpeed;
+int paddleMillisPerPixel = 1000 / paddleSpeed;
 
-TaskTimer TICK(0);
+TaskTimer timer(1 + NUM_PLAYERS);  // Ball + players
 
-long TICK_MILLIS = 20;
-
-int ballPixelsPerTick = ballSpeed * TICK_MILLIS / 1000 /* millis per sec */;
-int paddlePixelsPerTick = paddleSpeed * TICK_MILLIS / 1000 /* millis per sec */;
+#define BALL_TASK 100
 
 void SetupTFT() {
   tft.reset();
@@ -82,62 +84,69 @@ void setup(void) {
 
   SetupTFT();
 
-  TICK.RegisterTask(0);
-  TICK.SetTimer(0, TICK_MILLIS);
-  
+  ballX = oldBallX = SCREEN_WIDTH / 2;
+  ballY = oldBallY = SCREEN_HEIGHT / 2;
+
+  timer.RegisterTask(BALL_TASK);
+  resetBallTimer();
+
+  const int PADDLE_GAP = 35;  // How far from edge of screen should paddle be.
+  int nextPin = FIRST_BUTTON_PIN;
+  for (int i = 0; i < NUM_PLAYERS; ++i) {
+    int paddleX = SCREEN_WIDTH / 2;
+    int paddleY = i == 0 ? PADDLE_GAP : SCREEN_HEIGHT - PADDLE_GAP;
+    paddles[i].Init(paddleX, paddleY);
+    nextPin = paddles[i].SetupPins(nextPin);
+  }
+
+  for (int i = 0; i < NUM_PLAYERS; ++i) {
+    timer.RegisterTask(i);
+    resetPaddleTimer(i);
+  }
+
   tft.fillScreen(BLACK);
+}
+
+void maybeMovePaddle(int player) {
+  Paddle& paddle = paddles[player];
+  int oldX = paddle.x;
+  if (digitalRead(paddle.leftButtonPin) == LOW) {
+    paddle.x--;
+  }
+  if (digitalRead(paddle.rightButtonPin) == LOW) {
+    paddle.x++;
+  }
+  
+  paddle.x = GeneralUtil::Clamp(paddle.x, 0 - paddleWidth/2, SCREEN_WIDTH - paddleWidth/2);
+
+  if (paddle.x != oldX) {
+    tft.fillRect(oldX, paddle.y, paddleWidth, paddleHeight, BLACK);
+  }
+  tft.fillRect(paddle.x, paddle.y, paddleWidth, paddleHeight, WHITE);  
+}
+
+void resetBallTimer() {
+  timer.SetTimer(BALL_TASK, ballMillisPerPixel);
+}
+
+void resetPaddleTimer(int player) {
+  timer.SetTimer(player, paddleMillisPerPixel);
 }
 
 
 void loop() {
-
-
-
-
-
-  
-  // TODO LEFT OFF: Set up separate timers per entity so each can have its own speed.
-  // Basically, each entity should have a set amount of time it must wait before
-  // it moves one pixel.
-
-
-
-
-  
-  if (TICK.IsTimeUp(0)) {
-    TICK.SetTimer(0, TICK_MILLIS);
-  
-    int newX = paddleX;
-    int newY = paddleY;
-
-  
-    if (digitalRead(PINS.right_button.Get(0)) == LOW) {
-      newX += paddlePixelsPerTick;
-    }
-    if (digitalRead(PINS.left_button.Get(0)) == LOW) {
-      newX -= paddlePixelsPerTick;
-    }
-    
-    paddleX = GeneralUtil::Clamp(newX, 0 - paddleWidth/2, SCREEN_WIDTH - paddleWidth/2);
-    paddleY = GeneralUtil::Clamp(newY, 0 - paddleHeight/2, SCREEN_HEIGHT - paddleHeight/2);
-  
-  
-    // set the fill color to black and erase the previous
-    // position of the paddle if different from present
-    if (oldPaddleX != paddleX || oldPaddleY != paddleY) {
-      tft.fillRect(oldPaddleX, oldPaddleY, paddleWidth, paddleHeight, BLACK);
-    }
-
-    // draw the paddle on screen, save the current position
-    // as the previous.
-  
-    tft.fillRect(paddleX, paddleY, paddleWidth, paddleHeight, WHITE);
-    oldPaddleX = paddleX;
-    oldPaddleY = paddleY;
-
+  if (timer.IsTimeUp(BALL_TASK)) {
     moveBall();
+    resetBallTimer();
   }
-  TICK.Update();
+
+  for (int player = 0; player < NUM_PLAYERS; ++player) {
+     if (timer.IsTimeUp(player)) {
+       maybeMovePaddle(player);
+       resetPaddleTimer(player);
+     }
+  }
+  timer.Update();
 }
 
 // this function determines the ball's position on screen
@@ -152,14 +161,17 @@ void moveBall() {
   }
 
   // check if the ball and the paddle occupy the same space on screen
-  if (inPaddle(ballX, ballY, paddleX, paddleY, paddleWidth, paddleHeight)) {
-    ballDirectionX = -ballDirectionX;
-    ballDirectionY = -ballDirectionY;
+  for (int i = 0; i < NUM_PLAYERS; ++i) {
+    if (inPaddle(ballX, ballY, paddles[i].x, paddles[i].y, paddleWidth, paddleHeight)) {
+      ballDirectionX = -ballDirectionX;
+      ballDirectionY = -ballDirectionY;
+      break;
+    }
   }
 
   // update the ball's position
-  ballX += ballDirectionX * ballPixelsPerTick;
-  ballY += ballDirectionY * ballPixelsPerTick;
+  ballX += ballDirectionX;
+  ballY += ballDirectionY;
 
   // erase the ball's previous position
   if (oldBallX != ballX || oldBallY != ballY) {
