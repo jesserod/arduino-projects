@@ -16,7 +16,11 @@
 #define YELLOW  0xFFE0
 #define WHITE   0xFFFF
 
-#define FIRST_BUTTON_PIN 28
+// Arcade buttons
+#define FIRST_BUTTON_PIN 44
+
+// Smaller buttons in between.
+#define SECONDARY_FIRST_BUTTON_PIN 32
 
 #define NUM_PLAYERS 2
 
@@ -53,10 +57,10 @@ MCUFRIEND_kbv tft;
 int ballDirectionX = 1;
 int ballDirectionY = 1;
 
-int ballSpeed = 150; // Pixels per second
-int paddleSpeed = 100; // Pixels per second
+int ballSpeed = 100; // Pixels per second
+int paddleSpeed = 150; // Pixels per second
 int paddleHeight = 5;
-int paddleWidth = 20;
+int paddleWidth = 40;
 int ballSize = 5;
 
 int ballX, ballY, oldBallX, oldBallY;
@@ -82,6 +86,10 @@ void setup(void) {
   // Serial.begin(9600);
   // if (!Serial) delay(3000);
 
+  // As a safety precaution
+  for (int i = 23; i <= 53; i++) {
+    pinMode(i, INPUT_PULLUP);
+  }
   SetupTFT();
 
   ballX = oldBallX = SCREEN_WIDTH / 2;
@@ -110,11 +118,12 @@ void setup(void) {
 void maybeMovePaddle(int player) {
   Paddle& paddle = paddles[player];
   int oldX = paddle.x;
+  int leftDirection = player == 0 ? 1 : -1;
   if (digitalRead(paddle.leftButtonPin) == LOW) {
-    paddle.x--;
+    paddle.x += leftDirection;
   }
   if (digitalRead(paddle.rightButtonPin) == LOW) {
-    paddle.x++;
+    paddle.x += -1 * leftDirection;
   }
   
   paddle.x = GeneralUtil::Clamp(paddle.x, 0 - paddleWidth/2, SCREEN_WIDTH - paddleWidth/2);
@@ -122,7 +131,8 @@ void maybeMovePaddle(int player) {
   if (paddle.x != oldX) {
     tft.fillRect(oldX, paddle.y, paddleWidth, paddleHeight, BLACK);
   }
-  tft.fillRect(paddle.x, paddle.y, paddleWidth, paddleHeight, WHITE);  
+  int color = player == 0 ? WHITE : RED;
+  tft.fillRect(paddle.x, paddle.y, paddleWidth, paddleHeight, color);  
 }
 
 void resetBallTimer() {
