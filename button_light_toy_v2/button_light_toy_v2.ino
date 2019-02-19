@@ -4,25 +4,23 @@
 #include "array.h"
 #include "pitches.h"
 
-int kSpeakerPin = 4;
-
 int melody[] = {
 //  NOTE_C4, NOTE_G3, NOTE_C4, NOTE_A3
   NOTE_C5, NOTE_G4, NOTE_C5, NOTE_A4
 };
 
-// note durations: 4 = quarter note, 8 = eighth note, etc.:
-// int noteDurations[] = {
-// 4, 8, 8, 4, 4, 4, 4, 4
-// };
-
-
 using namespace jarduino;
 
 #define Len(arr) (sizeof(arr) / sizeof(int))
 
-int kButtonPins[] = {2 /*, 3*/};
-int kLightPins[] = {9, 8, 7, 6};
+int kButtonPin = 3;
+int kLightPins[] = {9, 8, 7, 8};
+int kBottomLightPin = 6;
+int kSpeakerPin = 5;
+int kSwitchPin = 4;
+
+// To avoid holding the button down spamming the song.
+int button_has_been_released = true;
 
 int LightPin(int index) {
   return kLightPins[index];
@@ -31,27 +29,18 @@ int LightPin(int index) {
 int NumLightPins() {
   return Len(kLightPins);
 }
-
-int ButtonPin(int index) {
-  return kButtonPins[index];
-}
-
-int NumButtonPins() {
-  return Len(kButtonPins);
-}
-
 // Must be volatile to be altered in InterruptCallback
-volatile int last_interacted_timestamp = 0;
+volatile unsigned long last_interacted_timestamp = 0;
 
 // Durations in milliseconds for lights and sounds
-int kDurations[] = {80, 160, 320};
+int kDurations[] = {80, 160, 320};  // Quarter note, half note, whole note
 
 // Interrupts on Arduino Pro must be pin 2 or pin 3
-int kInterruptId1 = digitalPinToInterrupt(2);
-//int kInterruptId2 = digitalPinToInterrupt(3);
+int kInterruptId1 = digitalPinToInterrupt(3);
+//int kInterruptId2 = digitalPinToInterrupt(2);
 
 // Idle time before device goes to sleep
-int kIdleTime = 120 * 1000;  // Milliseconds
+unsigned long kIdleTime = 5 * 1000;  // Milliseconds
 
 void SetLightState(int lightPin, bool lightIsOn) {
   if (lightIsOn) {
@@ -69,7 +58,7 @@ struct LightAndDuration {
 };
 
 Array<LightAndDuration> GetRandomLightSequence()  {
-  const int kNumFlashes = 6;
+  const int kNumFlashes = 9;
   Array<LightAndDuration> flashes(kNumFlashes);
   for (int i = 0; i < kNumFlashes; ++i) {
     int light_index = random(NumLightPins());
@@ -130,7 +119,6 @@ void InterruptCallback()
   */
   detachInterrupt(kInterruptId1);
   //detachInterrupt(kInterruptId2);
-  last_interacted_timestamp = millis();
 }
 
 void DeepSleep() {
@@ -150,39 +138,81 @@ void setup() {
   delay(50);
   Serial.println("setup()");
   delay(50);
-  for (int i = 0; i < Len(kButtonPins); ++i) {
-    pinMode(kButtonPins[i], INPUT_PULLUP);
-  }
+  button_has_been_released = true;
+
+  pinMode(kButtonPin, INPUT_PULLUP);
+  pinMode(kSwitchPin, INPUT_PULLUP);
+  
   for (int i = 0; i < NumLightPins(); ++i) {
     pinMode(kLightPins[i], OUTPUT);
   }
+  pinMode(kSpeakerPin, OUTPUT);
+  pinMode(kBottomLightPin, OUTPUT);
 
   last_interacted_timestamp = millis();
   // InterruptCallback();  // Initialize wake up timestamp.
-  srand(analogRead(A4));
+  srand(analogRead(A4));  // Create random seed by reading noise from pin
 }
 
-
+void Stutter(int duration, int note) {
+  int silence = 30;
+  int sound = 20;
+  for (int elapsed = 0; elapsed < duration; elapsed += silence) {
+    tone(kSpeakerPin, note, sound);
+    //noTone(kSpeakerPin);
+    delay(silence);
+  }
+}
 
 void loop() {
-
-  if ((millis() - last_interacted_timestamp) > kIdleTime) {
-    Serial.println("DEEP SLEEP");
+  unsigned long now = millis();
+  if ((now - last_interacted_timestamp) > kIdleTime) {
+    Serial.print("DEEP SLEEP ");
+    Serial.print(now);
+    Serial.print(" ");
+    Serial.print(last_interacted_timestamp);
+    Serial.print(" ");
+    Serial.print(now - last_interacted_timestamp);
+    Serial.print(" ");
+    Serial.print(kIdleTime);
+    Serial.println();
     delay(100);
     DeepSleep();
+    last_interacted_timestamp = now;
     Serial.println("Woke up!");
+    return;
     // Control will resume here when we are woken back up.
   }
+  bool button_pressed = digitalRead(kButtonPin) == LOW;
+  bool sound_mode = digitalRead(kSwitchPin) == LOW;
 
-
-
-  for (int i = 0; i < NumButtonPins(); ++i) {
-    if (digitalRead(ButtonPin(i)) == LOW) {
-      FlashLights();
-      last_interacted_timestamp = millis();
-      break;
-    }
+  if (button_pressed) {
+    last_interacted_timestamp = now;
   }
 
+  if (sound_mode && button_pressed && button_has_been_released) {  
+    FlashLights();  // Has a delay
+  }
+   
+  if (!sound_mode && button_pressed && button_has_been_released) {
+    digitalWrite(kBottomLightPin, HIGH);
+
+    // Make each light light up one at a time to count 3 seconds
+    // and make a noise the whole time.
+    digitalWrite(LightPin(0), HIGH);
+    delay(700);
+    digitalWrite(LightPin(2), HIGH);
+    delay(700);
+    digitalWrite(LightPin(3), HIGH);
+    Stutter(50, NOTE_C4);
+    Stutter(50, NOTE_C6);
+    delay(600);
+    TurnLightsOff();
+    digitalWrite(kBottomLightPin, LOW);
+    noTone(kSpeakerPin);
+  }
+  digitalWrite(kBottomLightPin, LOW);
+    
+  button_has_been_released = !button_pressed;
   delay(50);
 }
