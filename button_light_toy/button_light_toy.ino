@@ -20,7 +20,7 @@ int kSpeakerPin = 5;
 int kSwitchPin = 4;
 
 // To avoid holding the button down spamming the song.
-int button_has_been_released = true;
+int button_was_unpressed = true;
 
 int LightPin(int index) {
   return kLightPins[index];
@@ -81,14 +81,14 @@ void TurnLightOn(int light_pin) {
   }
 }
 
-void TurnLightsOff() {
+void TurnTopLightsOff() {
   for (int p = 0; p < NumLightPins(); ++p) {
     digitalWrite(LightPin(p), LOW);
   }
 }
 
-void FlashLights() {
-  Serial.println("FlashLights()");
+void PlaySongAndFlashLights() {
+  Serial.println("PlaySongAndFlashLights()");
   Array<LightAndDuration> flashes = GetRandomLightSequence();
 
   for (int f = 0; f < flashes.Size(); ++f) {
@@ -100,13 +100,13 @@ void FlashLights() {
     tone(kSpeakerPin, melody[flash.light_index], flash.duration);
     Serial.println(flash.duration);
     delay(flash.duration);
-    TurnLightsOff();
+    TurnTopLightsOff();
     noTone(kSpeakerPin);
     //  int pauseBetweenFlashes = max(flash.duration * 1.30, 100);
     int pauseBetweenFlashes = 50;
     delay(pauseBetweenFlashes);
   }
-  Serial.println("END FlashLights()");
+  Serial.println("END PlaySongAndFlashLights()");
 }
 
 void InterruptCallback()
@@ -138,7 +138,7 @@ void setup() {
   delay(50);
   Serial.println("setup()");
   delay(50);
-  button_has_been_released = true;
+  button_was_unpressed = true;
 
   pinMode(kButtonPin, INPUT_PULLUP);
   pinMode(kSwitchPin, INPUT_PULLUP);
@@ -154,14 +154,28 @@ void setup() {
   srand(analogRead(A4));  // Create random seed by reading noise from pin
 }
 
-void Stutter(int duration, int note) {
-  int silence = 30;
-  int sound = 20;
-  for (int elapsed = 0; elapsed < duration; elapsed += silence) {
-    tone(kSpeakerPin, note, sound);
+void PureSound(int duration, int note) {
+  //StaccatoTone(duration, note, 50 /* off_millis */, 75 /* on_millis */);
+  tone(kSpeakerPin, note, duration);
+  // delay(duration);
+  // Don't use noTone if we want sounds to run together.
+  //noTone(kSpeakerPin);
+}
+
+void GrittySound(int duration, int note) {
+  StaccatoTone(duration, note, 30 /* off_millis */, 20 /* on_millis */);
+}
+
+// Turns speaker on/off in rapid succession so the total wall
+// time elapsed is duration.  When the speaker is on, it will
+// emit the specified note.
+void StaccatoTone(int duration, int note, int sound_off_millis, int sound_on_millis) {
+  for (int elapsed = 0; elapsed < duration; elapsed += sound_off_millis) {
+    tone(kSpeakerPin, note, sound_on_millis);
     //noTone(kSpeakerPin);
-    delay(silence);
+    delay(sound_off_millis);
   }
+  noTone(kSpeakerPin);
 }
 
 void loop() {
@@ -183,36 +197,45 @@ void loop() {
     return;
     // Control will resume here when we are woken back up.
   }
-  bool button_pressed = digitalRead(kButtonPin) == LOW;
-  bool sound_mode = digitalRead(kSwitchPin) == LOW;
-
-  if (button_pressed) {
+  bool button_is_down = digitalRead(kButtonPin) == LOW;
+  bool song_mode = digitalRead(kSwitchPin) == LOW;
+  bool scanning_mode = !song_mode;
+  bool button_just_pressed = button_is_down && button_was_unpressed;
+  
+  if (button_is_down) {
     last_interacted_timestamp = now;
   }
 
-  if (sound_mode && button_pressed && button_has_been_released) {  
-    FlashLights();  // Has a delay
+  if (song_mode && button_just_pressed) {  
+    PlaySongAndFlashLights();  // Has a built-in delay
   }
    
-  if (!sound_mode && button_pressed && button_has_been_released) {
+  if (scanning_mode && button_just_pressed) {
     digitalWrite(kBottomLightPin, HIGH);
 
     // Make each light light up one at a time to count 3 seconds
     // and make a noise the whole time.
     digitalWrite(LightPin(0), HIGH);
-    delay(700);
+    PureSound(100, NOTE_G6);  // doesn't delay
+    delay(100);
     digitalWrite(LightPin(2), HIGH);
-    delay(700);
+    PureSound(100, NOTE_E6);  // doesn't delay
+    delay(100);
     digitalWrite(LightPin(3), HIGH);
-    Stutter(50, NOTE_C4);
-    Stutter(50, NOTE_C6);
-    delay(600);
-    TurnLightsOff();
-    digitalWrite(kBottomLightPin, LOW);
+    GrittySound(100, NOTE_C6);
+    GrittySound(100, NOTE_C8);
+    delay(500);
     noTone(kSpeakerPin);
   }
-  digitalWrite(kBottomLightPin, LOW);
-    
-  button_has_been_released = !button_pressed;
+
+  // Ensure all lights are off, unless we are in scanning mode
+  // and we're still holding the button down.
+  if (!(scanning_mode && button_is_down)) {
+    TurnTopLightsOff();
+    digitalWrite(kBottomLightPin, LOW);
+  }
+
+  // To avoid button-holds to keep triggering lights/sounds over and over.
+  button_was_unpressed = !button_is_down;
   delay(50);
 }
