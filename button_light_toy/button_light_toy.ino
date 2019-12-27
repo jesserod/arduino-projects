@@ -1,3 +1,39 @@
+/*
+ * Button light toy with 2 modes: song mode and scanner mode.
+ * - 3 lights on top and 1 light on the bottom.
+ * - 1 button to activate toy, 1 switch to change modes.
+ * 
+ * Scanner mode:
+ * - Upon button press, the light on the bottom immediately
+ * lights up as if it's a scanner (e.g. like at a cash register).
+ * - Sound will also begin.
+ * - Additionally, the 3 lights at the top light up one by one
+ * and when the third light is finished, a "complete" sound
+ * is made.
+ * - Lights on top and bottom will remain on if the button is
+ * held, otherwise, the lights will turn off after the completion
+ * sound.
+ * 
+ * Song mode:
+ * - Pressing the button will play a short random tune with
+ * lights on top appearing simultaneously with each tone.
+ *   
+ * Power saving:
+ * - After a few seconds of inactivity, the toy enters deep
+ * sleep to save power even when the toy is not powered on.
+ * - Should immediately awake from deep sleep upon button
+ * press without delay.
+ * - Requires a ATmega328p processor to perform deep sleep
+ * functionality.  This canallow allow the toy to maintain
+ * battery life over weeks or months even when the power is
+ * not manually turned off. To achieve this, ideally, you can
+ * cut the on-board LED of the Arduino, for example?
+ * http://www.home-automation-community.com/arduino-low-power-how-to-run-atmega328p-for-a-year-on-coin-cell-battery/
+ *   
+ * Verified compilation for Arduino Pro Mini / ATmega328p 8mhz
+ */
+
+
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include "LowPower.h"
